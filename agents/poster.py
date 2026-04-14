@@ -80,16 +80,17 @@ def post_to_note(article: dict) -> bool:
             page.goto(NOTE_LOGIN_URL, timeout=30000)
             page.wait_for_load_state("networkidle", timeout=15000)
 
-            # メールアドレス入力
-            page.fill('input[name="login"]', NOTE_EMAIL)
+            # メールアドレス入力（note.comはid="email"）
+            page.wait_for_selector('#email', timeout=15000)
+            page.fill('#email', NOTE_EMAIL)
             time.sleep(0.5)
 
-            # パスワード入力
-            page.fill('input[name="password"]', NOTE_PASSWORD)
+            # パスワード入力（note.comはid="password"）
+            page.fill('#password', NOTE_PASSWORD)
             time.sleep(0.5)
 
-            # ログインボタンクリック
-            page.click('button[type="submit"]')
+            # ログインボタンクリック（type="button"でテキストが「ログイン」）
+            page.click('button:has-text("ログイン")')
             page.wait_for_load_state("networkidle", timeout=20000)
             time.sleep(2)
 
