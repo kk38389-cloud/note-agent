@@ -66,12 +66,26 @@ def post_to_note(article: dict) -> bool:
         # GitHub Actions環境ではヘッドレスモード
         browser = p.chromium.launch(
             headless=True,
-            args=["--no-sandbox", "--disable-dev-shm-usage"]
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-blink-features=AutomationControlled",
+                "--disable-web-security",
+                "--disable-features=IsolateOrigins,site-per-process",
+            ]
         )
         context = browser.new_context(
             viewport={"width": 1280, "height": 800},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            locale="ja-JP",
+            timezone_id="Asia/Tokyo",
         )
+        # 自動化検知を回避
+        context.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+            Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3]});
+            Object.defineProperty(navigator, 'languages', {get: () => ['ja-JP', 'ja']});
+        """)
         page = context.new_page()
 
         try:
@@ -91,13 +105,21 @@ def post_to_note(article: dict) -> bool:
 
             # ログインボタンクリック（type="button"でテキストが「ログイン」）
             page.click('button:has-text("ログイン")')
-            page.wait_for_load_state("networkidle", timeout=20000)
-            time.sleep(2)
 
-            # ログイン確認
-            if "login" in page.url:
-                logger.error("ログイン失敗。メールアドレスまたはパスワードを確認してください")
+            # URLが/loginから変わるまで待つ（最大25秒）
+            try:
+                page.wait_for_url(lambda url: "login" not in url, timeout=25000)
+                logger.info(f"ログイン成功: {page.url}")
+            except PlaywrightTimeout:
+                current_url = page.url
+                screenshot_path = os.path.join(LOG_DIR, "login_failed.png")
+                os.makedirs(LOG_DIR, exist_ok=True)
+                page.screenshot(path=screenshot_path)
+                logger.error(f"ログイン失敗。URL: {current_url}")
+                logger.error("スクリーンショット保存: login_failed.png (Artifactsでダウンロード可能)")
                 return False
+
+            time.sleep(2)
 
             logger.info("ログイン成功")
 
