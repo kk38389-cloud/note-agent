@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
+from playwright_stealth import stealth_sync
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from config.settings import NOTE_EMAIL, NOTE_PASSWORD, DATA_DIR, LOG_DIR
@@ -80,13 +81,9 @@ def post_to_note(article: dict) -> bool:
             locale="ja-JP",
             timezone_id="Asia/Tokyo",
         )
-        # 自動化検知を回避
-        context.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-            Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3]});
-            Object.defineProperty(navigator, 'languages', {get: () => ['ja-JP', 'ja']});
-        """)
         page = context.new_page()
+        # stealth modeでボット検知を回避
+        stealth_sync(page)
 
         try:
             # ─── ログイン ───
