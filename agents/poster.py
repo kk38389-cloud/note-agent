@@ -97,18 +97,20 @@ def post_to_note(article: dict) -> bool:
                         # Playwrightに不要なフィールドを除去
                         for field in ["hostOnly", "session", "storeId", "id"]:
                             cookie.pop(field, None)
+                        # ドメイン形式を統一（note.com → .note.com）
+                        if "domain" in cookie and not cookie["domain"].startswith("."):
+                            cookie["domain"] = "." + cookie["domain"]
                     context.add_cookies(cookies)
                     logger.info(f"{len(cookies)}件のクッキーをセット")
                 except json.JSONDecodeError as e:
                     logger.error(f"クッキーのJSON解析エラー: {e}")
                     return False
 
-                # noteトップページを開いてログイン状態を確認
-                page.goto("https://note.com", timeout=30000)
+                # /notes/new に直接アクセスしてログイン確認（トップページは認証不要なので使わない）
+                page.goto(NOTE_NEW_POST_URL, timeout=30000)
                 page.wait_for_load_state("networkidle", timeout=15000)
                 time.sleep(2)
 
-                # ログイン確認（ログインしていればURLにloginが含まれない）
                 if "login" in page.url:
                     logger.error("クッキーが無効または期限切れです。Cookie Editorで再エクスポートしてください")
                     screenshot_path = os.path.join(LOG_DIR, "cookie_failed.png")
@@ -116,7 +118,9 @@ def post_to_note(article: dict) -> bool:
                     page.screenshot(path=screenshot_path)
                     return False
 
-                logger.info("クッキーでログイン成功")
+                logger.info(f"クッキーでログイン成功・投稿ページ到達: {page.url}")
+                # すでに/notes/newにいるのでそのまま続行
+                time.sleep(1)
 
             elif NOTE_EMAIL and NOTE_PASSWORD:
                 # メール/パスワードでログイン（reCAPTCHAが出る場合は失敗）
@@ -145,20 +149,6 @@ def post_to_note(article: dict) -> bool:
 
             else:
                 logger.error("NOTE_COOKIES または NOTE_EMAIL/NOTE_PASSWORD が未設定です")
-                return False
-
-            # ─── 新規記事作成ページへ ───
-            logger.info("新規記事作成ページに移動中...")
-            page.goto(NOTE_NEW_POST_URL, timeout=30000)
-            page.wait_for_load_state("networkidle", timeout=15000)
-            time.sleep(2)
-
-            # ログインが切れていた場合の確認
-            if "login" in page.url:
-                logger.error("記事作成ページでログイン切れが発生しました")
-                screenshot_path = os.path.join(LOG_DIR, "session_expired.png")
-                os.makedirs(LOG_DIR, exist_ok=True)
-                page.screenshot(path=screenshot_path)
                 return False
 
             # ─── タイトル入力 ───
