@@ -89,27 +89,26 @@ def post_to_note(article: dict) -> bool:
                 logger.info("クッキーでログイン中...")
                 try:
                     raw_cookies = json.loads(NOTE_COOKIES)
-                    valid_same_site = {"Strict", "Lax", "None"}
+                    logger.info(f"クッキー件数: {len(raw_cookies)}")
+                    # 最初のクッキーのキー一覧をデバッグ出力（値は非表示）
+                    if raw_cookies:
+                        logger.info(f"クッキーフィールド: {list(raw_cookies[0].keys())}")
+                    # 絶対最小構成：name + value + url のみ
                     cookies = []
-                    for c in raw_cookies:
-                        if not c.get("name") or c.get("value") is None:
+                    for i, c in enumerate(raw_cookies):
+                        name = c.get("name", "")
+                        value = c.get("value")
+                        if not name or value is None:
+                            logger.info(f"スキップ [{i}]: name={name!r}, value={value!r}")
                             continue
-                        # urlのみ使用（domain/pathは指定しない）
-                        cookie = {
-                            "name": c["name"],
-                            "value": c["value"],
+                        cookies.append({
+                            "name": name,
+                            "value": str(value),
                             "url": "https://note.com",
-                            "httpOnly": bool(c.get("httpOnly", False)),
-                            "secure": bool(c.get("secure", False)),
-                            "sameSite": c["sameSite"] if c.get("sameSite") in valid_same_site else "Lax",
-                        }
-                        # expirationDate → expires（session cookieは除外）
-                        exp = c.get("expirationDate") or c.get("expires")
-                        if exp and float(exp) > 0:
-                            cookie["expires"] = int(float(exp))
-                        cookies.append(cookie)
+                        })
+                    logger.info(f"{len(cookies)}件のクッキーを追加します")
                     context.add_cookies(cookies)
-                    logger.info(f"{len(cookies)}件のクッキーをセット")
+                    logger.info(f"{len(cookies)}件のクッキーをセット完了")
                 except json.JSONDecodeError as e:
                     logger.error(f"クッキーのJSON解析エラー: {e}")
                     return False
