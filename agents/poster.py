@@ -160,25 +160,24 @@ def post_to_note(article: dict) -> bool:
 
             # ─── タイトル入力 ───
             logger.info(f"タイトル入力: {title}")
-            title_selector = 'div[data-placeholder="タイトル"]'
-            page.wait_for_selector(title_selector, timeout=10000)
+            title_selector = 'textarea[placeholder="記事タイトル"]'
+            page.wait_for_selector(title_selector, timeout=15000)
             page.click(title_selector)
-            page.type(title_selector, title, delay=30)
+            page.fill(title_selector, title)
             time.sleep(0.5)
 
             # ─── 本文入力 ───
             logger.info("本文入力中...")
-            body_selector = 'div[data-placeholder="本文を入力してください"]'
-            if not page.is_visible(body_selector):
-                body_selector = 'div.o-noteEditable'
-
+            body_selector = 'div.ProseMirror'
+            page.wait_for_selector(body_selector, timeout=10000)
             page.click(body_selector)
             time.sleep(0.5)
 
+            # 本文を段落ごとに入力
             paragraphs = full_body.split("\n")
             for i, para in enumerate(paragraphs):
                 if para:
-                    page.keyboard.type(para, delay=10)
+                    page.keyboard.type(para, delay=5)
                 page.keyboard.press("Enter")
                 if i % 20 == 0 and i > 0:
                     time.sleep(0.3)
@@ -186,43 +185,24 @@ def post_to_note(article: dict) -> bool:
             time.sleep(1)
             logger.info("本文入力完了")
 
-            # ─── 公開ボタンをクリック ───
+            # ─── 「公開に進む」ボタンをクリック ───
             logger.info("公開処理中...")
-            publish_btn_selectors = [
-                'button:has-text("公開")',
-                'button[data-type="publish"]',
-                '.m-headerPostMenu__publish button',
-            ]
-
-            publish_btn = None
-            for selector in publish_btn_selectors:
-                try:
-                    if page.is_visible(selector):
-                        publish_btn = selector
-                        break
-                except Exception:
-                    continue
-
-            if not publish_btn:
-                logger.error("公開ボタンが見つかりません")
-                screenshot_path = os.path.join(LOG_DIR, "publish_error.png")
-                os.makedirs(LOG_DIR, exist_ok=True)
-                page.screenshot(path=screenshot_path)
-                return False
-
+            publish_btn = 'button:has-text("公開に進む")'
+            page.wait_for_selector(publish_btn, timeout=10000)
             page.click(publish_btn)
-            time.sleep(1)
+            time.sleep(2)
 
-            # 最終確認ダイアログ
+            # 公開確認ダイアログの「投稿する」ボタン
             try:
                 confirm_btn = page.wait_for_selector(
-                    'button:has-text("投稿する")', timeout=5000
+                    'button:has-text("投稿する")', timeout=8000
                 )
                 if confirm_btn:
                     confirm_btn.click()
                     logger.info("投稿確認ボタンをクリック")
             except PlaywrightTimeout:
-                pass
+                # 確認ダイアログがない場合はそのまま続行
+                logger.info("確認ダイアログなし、そのまま続行")
 
             time.sleep(3)
             page.wait_for_load_state("networkidle", timeout=15000)
