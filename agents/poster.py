@@ -1,6 +1,7 @@
 """
 poster.py - note自動投稿エージェント（Playwright使用）
 生成した記事をnote.comにブラウザ自動操作で投稿する
+クッキーによるログインスキップに対応
 """
 import json
 import logging
@@ -21,6 +22,9 @@ logger = logging.getLogger("note_poster")
 
 NOTE_LOGIN_URL = "https://note.com/login"
 NOTE_NEW_POST_URL = "https://note.com/notes/new"
+
+# クッキー認証（reCAPTCHA回避）
+NOTE_COOKIES = os.environ.get("NOTE_COOKIES", "")
 
 
 def save_post_history(article: dict, note_url: str = ""):
@@ -51,10 +55,6 @@ def save_post_history(article: dict, note_url: str = ""):
 
 def post_to_note(article: dict) -> bool:
     """Playwrightでnoteに記事を投稿"""
-    if not NOTE_EMAIL or not NOTE_PASSWORD:
-        logger.error("NOTE_EMAIL または NOTE_PASSWORD が未設定です")
-        return False
-
     title = article["title"]
     body = article["body"]
     hashtags = article.get("hashtags", [])
@@ -64,15 +64,12 @@ def post_to_note(article: dict) -> bool:
     full_body = f"{body}\n\n{hashtag_str}"
 
     with sync_playwright() as p:
-        # GitHub Actions環境ではヘッドレスモード
         browser = p.chromium.launch(
             headless=True,
             args=[
                 "--no-sandbox",
                 "--disable-dev-shm-usage",
                 "--disable-blink-features=AutomationControlled",
-                "--disable-web-security",
-                "--disable-features=IsolateOrigins,site-per-process",
             ]
         )
         context = browser.new_context(
@@ -81,50 +78,80 @@ def post_to_note(article: dict) -> bool:
             locale="ja-JP",
             timezone_id="Asia/Tokyo",
         )
+
         page = context.new_page()
-        # stealth modeでボット検知を回避
         stealth_sync(page)
 
         try:
-            # ─── ログイン ───
-            logger.info("noteにログイン中...")
-            page.goto(NOTE_LOGIN_URL, timeout=30000)
-            page.wait_for_load_state("networkidle", timeout=15000)
+            # ─── 認証方法の選択 ───
+            if NOTE_COOKIES:
+                # クッキーを使ってログインをスキップ（reCAPTCHA回避）
+                logger.info("クッキーでログイン中...")
+                try:
+                    cookies = json.loads(NOTE_COOKIES)
+                    context.add_cookies(cookies)
+                    logger.info(f"{len(cookies)}件のクッキーをセット")
+                except json.JSONDecodeError as e:
+                    logger.error(f"クッキーのJSON解析エラー: {e}")
+                    return False
 
-            # メールアドレス入力（note.comはid="email"）
-            page.wait_for_selector('#email', timeout=15000)
-            page.fill('#email', NOTE_EMAIL)
-            time.sleep(0.5)
+                # noteトップページを開いてログイン状態を確認
+                page.goto("https://note.com", timeout=30000)
+                page.wait_for_load_state("networkidle", timeout=15000)
+                time.sleep(2)
 
-            # パスワード入力（note.comはid="password"）
-            page.fill('#password', NOTE_PASSWORD)
-            time.sleep(0.5)
+                # ログイン確認（ログインしていればURLにloginが含まれない）
+                if "login" in page.url:
+                    logger.error("クッキーが無効または期限切れです。Cookie Editorで再エクスポートしてください")
+                    screenshot_path = os.path.join(LOG_DIR, "cookie_failed.png")
+                    os.makedirs(LOG_DIR, exist_ok=True)
+                    page.screenshot(path=screenshot_path)
+                    return False
 
-            # ログインボタンクリック（type="button"でテキストが「ログイン」）
-            page.click('button:has-text("ログイン")')
+                logger.info("クッキーでログイン成功")
 
-            # URLが/loginから変わるまで待つ（最大25秒）
-            try:
-                page.wait_for_url(lambda url: "login" not in url, timeout=25000)
-                logger.info(f"ログイン成功: {page.url}")
-            except PlaywrightTimeout:
-                current_url = page.url
-                screenshot_path = os.path.join(LOG_DIR, "login_failed.png")
-                os.makedirs(LOG_DIR, exist_ok=True)
-                page.screenshot(path=screenshot_path)
-                logger.error(f"ログイン失敗。URL: {current_url}")
-                logger.error("スクリーンショット保存: login_failed.png (Artifactsでダウンロード可能)")
+            elif NOTE_EMAIL and NOTE_PASSWORD:
+                # メール/パスワードでログイン（reCAPTCHAが出る場合は失敗）
+                logger.info("メール/パスワードでログイン中...")
+                page.goto(NOTE_LOGIN_URL, timeout=30000)
+                page.wait_for_load_state("networkidle", timeout=15000)
+
+                page.wait_for_selector('#email', timeout=15000)
+                page.fill('#email', NOTE_EMAIL)
+                time.sleep(0.5)
+                page.fill('#password', NOTE_PASSWORD)
+                time.sleep(0.5)
+                page.click('button:has-text("ログイン")')
+
+                try:
+                    page.wait_for_url(lambda url: "login" not in url, timeout=25000)
+                    logger.info(f"ログイン成功: {page.url}")
+                except PlaywrightTimeout:
+                    screenshot_path = os.path.join(LOG_DIR, "login_failed.png")
+                    os.makedirs(LOG_DIR, exist_ok=True)
+                    page.screenshot(path=screenshot_path)
+                    logger.error("ログイン失敗（reCAPTCHAが表示されている可能性があります）")
+                    return False
+
+                time.sleep(2)
+
+            else:
+                logger.error("NOTE_COOKIES または NOTE_EMAIL/NOTE_PASSWORD が未設定です")
                 return False
-
-            time.sleep(2)
-
-            logger.info("ログイン成功")
 
             # ─── 新規記事作成ページへ ───
             logger.info("新規記事作成ページに移動中...")
             page.goto(NOTE_NEW_POST_URL, timeout=30000)
             page.wait_for_load_state("networkidle", timeout=15000)
             time.sleep(2)
+
+            # ログインが切れていた場合の確認
+            if "login" in page.url:
+                logger.error("記事作成ページでログイン切れが発生しました")
+                screenshot_path = os.path.join(LOG_DIR, "session_expired.png")
+                os.makedirs(LOG_DIR, exist_ok=True)
+                page.screenshot(path=screenshot_path)
+                return False
 
             # ─── タイトル入力 ───
             logger.info(f"タイトル入力: {title}")
@@ -137,21 +164,17 @@ def post_to_note(article: dict) -> bool:
             # ─── 本文入力 ───
             logger.info("本文入力中...")
             body_selector = 'div[data-placeholder="本文を入力してください"]'
-            # セレクタが違う場合の代替
             if not page.is_visible(body_selector):
                 body_selector = 'div.o-noteEditable'
 
             page.click(body_selector)
             time.sleep(0.5)
 
-            # 本文を段落ごとに入力（長文対応）
             paragraphs = full_body.split("\n")
             for i, para in enumerate(paragraphs):
                 if para:
                     page.keyboard.type(para, delay=10)
                 page.keyboard.press("Enter")
-
-                # 長文の場合は少し待機（タイムアウト防止）
                 if i % 20 == 0 and i > 0:
                     time.sleep(0.3)
 
@@ -160,8 +183,6 @@ def post_to_note(article: dict) -> bool:
 
             # ─── 公開ボタンをクリック ───
             logger.info("公開処理中...")
-
-            # 「公開」ボタンを探す
             publish_btn_selectors = [
                 'button:has-text("公開")',
                 'button[data-type="publish"]',
@@ -179,17 +200,15 @@ def post_to_note(article: dict) -> bool:
 
             if not publish_btn:
                 logger.error("公開ボタンが見つかりません")
-                # スクリーンショット保存（デバッグ用）
                 screenshot_path = os.path.join(LOG_DIR, "publish_error.png")
                 os.makedirs(LOG_DIR, exist_ok=True)
                 page.screenshot(path=screenshot_path)
-                logger.info(f"スクリーンショット保存: {screenshot_path}")
                 return False
 
             page.click(publish_btn)
             time.sleep(1)
 
-            # 最終確認ダイアログがある場合
+            # 最終確認ダイアログ
             try:
                 confirm_btn = page.wait_for_selector(
                     'button:has-text("投稿する")', timeout=5000
@@ -198,17 +217,13 @@ def post_to_note(article: dict) -> bool:
                     confirm_btn.click()
                     logger.info("投稿確認ボタンをクリック")
             except PlaywrightTimeout:
-                pass  # 確認ダイアログがない場合はスキップ
+                pass
 
-            # 投稿完了を待つ
             time.sleep(3)
             page.wait_for_load_state("networkidle", timeout=15000)
 
-            # 投稿後のURLを取得
             note_url = page.url
             logger.info(f"投稿完了: {note_url}")
-
-            # 履歴保存
             save_post_history(article, note_url)
             return True
 
@@ -248,7 +263,6 @@ def run(article: dict) -> bool:
 
 
 if __name__ == "__main__":
-    # テスト用: モック記事を投稿
     mock_article = {
         "title": "テスト記事：高配当株の選び方",
         "body": "## テスト\nこれはテスト投稿です。\n\n## まとめ\nテスト完了。\n\n※本記事は情報提供のみです。",
