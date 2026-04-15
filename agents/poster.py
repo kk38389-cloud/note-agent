@@ -94,11 +94,11 @@ def post_to_note(article: dict) -> bool:
                     for c in raw_cookies:
                         if not c.get("name") or c.get("value") is None:
                             continue
+                        # urlのみ使用（domain/pathは指定しない）
                         cookie = {
                             "name": c["name"],
                             "value": c["value"],
                             "url": "https://note.com",
-                            "path": c.get("path", "/"),
                             "httpOnly": bool(c.get("httpOnly", False)),
                             "secure": bool(c.get("secure", False)),
                             "sameSite": c["sameSite"] if c.get("sameSite") in valid_same_site else "Lax",
