@@ -89,12 +89,25 @@ def post_to_note(article: dict) -> bool:
                 logger.info("クッキーでログイン中...")
                 try:
                     raw_cookies = json.loads(NOTE_COOKIES)
-                    # name・value・urlだけの最小構成に変換（フィールド不一致エラーを回避）
-                    cookies = [
-                        {"name": c["name"], "value": c["value"], "url": "https://note.com"}
-                        for c in raw_cookies
-                        if c.get("name") and c.get("value") is not None
-                    ]
+                    valid_same_site = {"Strict", "Lax", "None"}
+                    cookies = []
+                    for c in raw_cookies:
+                        if not c.get("name") or c.get("value") is None:
+                            continue
+                        cookie = {
+                            "name": c["name"],
+                            "value": c["value"],
+                            "url": "https://note.com",
+                            "path": c.get("path", "/"),
+                            "httpOnly": bool(c.get("httpOnly", False)),
+                            "secure": bool(c.get("secure", False)),
+                            "sameSite": c["sameSite"] if c.get("sameSite") in valid_same_site else "Lax",
+                        }
+                        # expirationDate → expires（session cookieは除外）
+                        exp = c.get("expirationDate") or c.get("expires")
+                        if exp and float(exp) > 0:
+                            cookie["expires"] = int(float(exp))
+                        cookies.append(cookie)
                     context.add_cookies(cookies)
                     logger.info(f"{len(cookies)}件のクッキーをセット")
                 except json.JSONDecodeError as e:
