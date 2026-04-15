@@ -89,6 +89,14 @@ def post_to_note(article: dict) -> bool:
                 logger.info("クッキーでログイン中...")
                 try:
                     cookies = json.loads(NOTE_COOKIES)
+                    # PlaywrightはsameSiteにStrict/Lax/Noneのみ受け付ける
+                    valid_same_site = {"Strict", "Lax", "None"}
+                    for cookie in cookies:
+                        if cookie.get("sameSite") not in valid_same_site:
+                            cookie["sameSite"] = "Lax"
+                        # Playwrightに不要なフィールドを除去
+                        for field in ["hostOnly", "session", "storeId", "id"]:
+                            cookie.pop(field, None)
                     context.add_cookies(cookies)
                     logger.info(f"{len(cookies)}件のクッキーをセット")
                 except json.JSONDecodeError as e:
