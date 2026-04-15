@@ -89,28 +89,12 @@ def post_to_note(article: dict) -> bool:
                 logger.info("クッキーでログイン中...")
                 try:
                     raw_cookies = json.loads(NOTE_COOKIES)
-                    # Playwrightが受け付けるフィールドのみに絞り込む
-                    valid_same_site = {"Strict", "Lax", "None"}
-                    cookies = []
-                    for c in raw_cookies:
-                        cookie = {
-                            "name": c["name"],
-                            "value": c["value"],
-                            "domain": c.get("domain", "note.com"),
-                            "path": c.get("path", "/"),
-                            "secure": c.get("secure", False),
-                            "httpOnly": c.get("httpOnly", False),
-                            "sameSite": c.get("sameSite", "Lax") if c.get("sameSite") in valid_same_site else "Lax",
-                        }
-                        # expirationDate → expires に変換（Cookie Editor形式の対応）
-                        if "expirationDate" in c:
-                            cookie["expires"] = int(c["expirationDate"])
-                        elif "expires" in c:
-                            cookie["expires"] = int(c["expires"])
-                        # ドメインの先頭に.を付ける（サブドメイン対応）
-                        if not cookie["domain"].startswith("."):
-                            cookie["domain"] = "." + cookie["domain"]
-                        cookies.append(cookie)
+                    # name・value・urlだけの最小構成に変換（フィールド不一致エラーを回避）
+                    cookies = [
+                        {"name": c["name"], "value": c["value"], "url": "https://note.com"}
+                        for c in raw_cookies
+                        if c.get("name") and c.get("value") is not None
+                    ]
                     context.add_cookies(cookies)
                     logger.info(f"{len(cookies)}件のクッキーをセット")
                 except json.JSONDecodeError as e:
