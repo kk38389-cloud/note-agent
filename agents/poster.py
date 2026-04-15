@@ -88,18 +88,29 @@ def post_to_note(article: dict) -> bool:
                 # クッキーを使ってログインをスキップ（reCAPTCHA回避）
                 logger.info("クッキーでログイン中...")
                 try:
-                    cookies = json.loads(NOTE_COOKIES)
-                    # PlaywrightはsameSiteにStrict/Lax/Noneのみ受け付ける
+                    raw_cookies = json.loads(NOTE_COOKIES)
+                    # Playwrightが受け付けるフィールドのみに絞り込む
                     valid_same_site = {"Strict", "Lax", "None"}
-                    for cookie in cookies:
-                        if cookie.get("sameSite") not in valid_same_site:
-                            cookie["sameSite"] = "Lax"
-                        # Playwrightに不要なフィールドを除去
-                        for field in ["hostOnly", "session", "storeId", "id"]:
-                            cookie.pop(field, None)
-                        # ドメイン形式を統一（note.com → .note.com）
-                        if "domain" in cookie and not cookie["domain"].startswith("."):
+                    cookies = []
+                    for c in raw_cookies:
+                        cookie = {
+                            "name": c["name"],
+                            "value": c["value"],
+                            "domain": c.get("domain", "note.com"),
+                            "path": c.get("path", "/"),
+                            "secure": c.get("secure", False),
+                            "httpOnly": c.get("httpOnly", False),
+                            "sameSite": c.get("sameSite", "Lax") if c.get("sameSite") in valid_same_site else "Lax",
+                        }
+                        # expirationDate → expires に変換（Cookie Editor形式の対応）
+                        if "expirationDate" in c:
+                            cookie["expires"] = int(c["expirationDate"])
+                        elif "expires" in c:
+                            cookie["expires"] = int(c["expires"])
+                        # ドメインの先頭に.を付ける（サブドメイン対応）
+                        if not cookie["domain"].startswith("."):
                             cookie["domain"] = "." + cookie["domain"]
+                        cookies.append(cookie)
                     context.add_cookies(cookies)
                     logger.info(f"{len(cookies)}件のクッキーをセット")
                 except json.JSONDecodeError as e:
