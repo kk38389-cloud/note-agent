@@ -52,6 +52,14 @@ jobs:
           NOTE_COOKIES: ${{ secrets.NOTE_COOKIES }}
         run: python main.py
 
+      - name: Upload thumbnail (on success)
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: thumbnail
+          path: data/thumbnails/*.png
+          retention-days: 7
+
       - name: Upload error screenshots (on failure)
         if: failure()
         uses: actions/upload-artifact@v4
