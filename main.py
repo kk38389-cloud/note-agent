@@ -45,7 +45,7 @@ def main():
     logger.info(f"記事生成完了: 「{article['title']}」 ({article['char_count']}字) [{article.get('style', '')}]")
 
     # Step 3: サムネイル生成
-    logger.info("[Step 3/3] サムネイル生成中...")
+    logger.info("[Step 3/4] サムネイル生成中...")
     try:
         thumbnail_path = generate_thumbnail(article)
         if thumbnail_path:
@@ -56,9 +56,10 @@ def main():
     except Exception as e:
         logger.warning(f"サムネイル生成エラー（投稿は続行）: {e}")
 
-    # Step 4: note投稿
+    # Step 4: note投稿（サムネイル付き）
     logger.info("[Step 4/4] noteに投稿中...")
-    success = post_article(article)
+    thumbnail_path = article.get("thumbnail_path", "")
+    success = post_article(article, thumbnail_path=thumbnail_path)
 
     if success:
         logger.info("✅ note投稿が完了しました")

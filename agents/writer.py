@@ -9,6 +9,7 @@ import urllib.request
 import os
 import sys
 from pathlib import Path
+from datetime import datetime, timezone, timedelta
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from config.settings import (
@@ -164,6 +165,14 @@ def call_claude(title: str, topic: str, theme: str, style: dict, news_context: s
         logger.warning("ANTHROPIC_API_KEY未設定。モック記事を生成します")
         return generate_mock_article(title, topic, style)
 
+    # 現在の日本時間を取得
+    jst = timezone(timedelta(hours=9))
+    now_jst = datetime.now(jst)
+    today_str = now_jst.strftime("%Y年%m月%d日")
+    this_year = now_jst.year
+    last_year = this_year - 1
+    two_years_ago = this_year - 2
+
     news_section = ""
     if news_context:
         news_section = f"""
@@ -178,10 +187,17 @@ def call_claude(title: str, topic: str, theme: str, style: dict, news_context: s
 読者3,000人以上の固定ファンがいて、「正直すぎる投資記録」で人気です。
 
 ━━━━━━━━━━━━━━━━━━━━━━━━
+【重要】今日の日付: {today_str}
+- 「今年」= {this_year}年、「去年」= {last_year}年、「一昨年」= {two_years_ago}年
+- 記事内の年号・時期は必ずこの基準に合わせること
+- 「2024年」を「今年」や「最近」と書かないこと
+━━━━━━━━━━━━━━━━━━━━━━━━
+
 タイトル: 「{title}」
 テーマ: {theme} / {topic}
 今回の記事スタイル: {style['name']}
 冒頭の書き出し（この一文から始めてください）: 「{style['opening'].format(topic=topic)}」
+
 ━━━━━━━━━━━━━━━━━━━━━━━━
 {news_section}
 
@@ -257,13 +273,18 @@ def call_claude(title: str, topic: str, theme: str, style: dict, news_context: s
 
 
 def generate_mock_article(title: str, topic: str, style: dict) -> str:
+    jst = timezone(timedelta(hours=9))
+    now_jst = datetime.now(jst)
+    last_year = now_jst.year - 1
+    two_years_ago = now_jst.year - 2
+
     return f"""最初に正直に言います。私は{topic}で失敗しています。
 
 先月、含み損が47万円を超えた時、初めてスマホの証券アプリを開くのが怖くなりました。
 
 ## その失敗の全貌
 
-時期: 2024年秋〜2025年初頭
+時期: {two_years_ago}年秋〜{last_year}年初頭
 対象: {topic}関連3銘柄
 損失額: -47万円（評価損）
 

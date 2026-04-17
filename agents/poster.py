@@ -53,7 +53,104 @@ def save_post_history(article: dict, note_url: str = ""):
     logger.info(f"投稿履歴を保存: {posts_file}")
 
 
-def post_to_note(article: dict) -> bool:
+def upload_thumbnail(page, thumbnail_path: str) -> bool:
+    """
+    公開設定パネルでアイキャッチ画像をアップロードする。
+    成功すれば True、失敗しても投稿自体はキャンセルしない。
+    """
+    if not thumbnail_path or not os.path.exists(thumbnail_path):
+        logger.info("サムネイルパスなし、スキップ")
+        return False
+
+    logger.info(f"サムネイルアップロード開始: {thumbnail_path}")
+
+    # note の公開パネルで使われているファイル入力セレクタを順に試す
+    FILE_INPUT_SELECTORS = [
+        'input[type="file"][accept*="image"]',
+        'input[type="file"][accept*="jpeg"]',
+        'input[type="file"]',
+    ]
+
+    file_input_selector = None
+    for sel in FILE_INPUT_SELECTORS:
+        try:
+            el = page.wait_for_selector(sel, timeout=5000, state="attached")
+            if el:
+                file_input_selector = sel
+                logger.info(f"ファイル入力発見: {sel}")
+                break
+        except PlaywrightTimeout:
+            continue
+
+    if not file_input_selector:
+        # クリックでファイル入力が現れるパターンを試す
+        UPLOAD_BTN_SELECTORS = [
+            'button:has-text("アイキャッチ")',
+            'button:has-text("画像")',
+            '[class*="eyecatch"]',
+            '[class*="thumbnail"]',
+            '[class*="cover"]',
+        ]
+        for btn_sel in UPLOAD_BTN_SELECTORS:
+            try:
+                btn = page.query_selector(btn_sel)
+                if btn:
+                    btn.click()
+                    time.sleep(1)
+                    for sel in FILE_INPUT_SELECTORS:
+                        try:
+                            el = page.wait_for_selector(sel, timeout=3000, state="attached")
+                            if el:
+                                file_input_selector = sel
+                                break
+                        except PlaywrightTimeout:
+                            continue
+                    if file_input_selector:
+                        break
+            except Exception:
+                continue
+
+    if not file_input_selector:
+        logger.warning("アイキャッチのファイル入力が見つかりません（セレクタ要確認）")
+        # デバッグ用スクリーンショット保存
+        try:
+            ss_path = os.path.join(LOG_DIR, "thumb_upload_debug.png")
+            os.makedirs(LOG_DIR, exist_ok=True)
+            page.screenshot(path=ss_path)
+            logger.info(f"デバッグSS保存: {ss_path}")
+        except Exception:
+            pass
+        return False
+
+    try:
+        page.set_input_files(file_input_selector, thumbnail_path)
+        logger.info("ファイルをセット完了")
+        time.sleep(2)
+
+        # トリミング/確認ダイアログへの対応
+        CONFIRM_TEXTS = ["適用", "OK", "確認", "保存", "設定する", "完了"]
+        for confirm_text in CONFIRM_TEXTS:
+            try:
+                btn = page.wait_for_selector(
+                    f'button:has-text("{confirm_text}")', timeout=3000
+                )
+                if btn:
+                    btn.click()
+                    logger.info(f"確認ボタンクリック: 「{confirm_text}」")
+                    time.sleep(1.5)
+                    break
+            except PlaywrightTimeout:
+                continue
+
+        logger.info("サムネイルアップロード完了")
+        return True
+
+    except Exception as e:
+        logger.warning(f"サムネイルアップロード失敗（投稿は続行）: {e}")
+        return False
+
+
+def post_to_note(article: dict, thumbnail_path: str = "") -> bool:
     """Playwrightでnoteに記事を投稿"""
     title = article["title"]
     body = article["body"]
@@ -192,6 +289,9 @@ def post_to_note(article: dict) -> bool:
             page.click(publish_btn)
             time.sleep(2)
 
+            # ─── サムネイル（アイキャッチ）アップロード ───
+            upload_thumbnail(page, thumbnail_path)
+
             # 公開確認ダイアログの「投稿する」ボタン
             try:
                 confirm_btn = page.wait_for_selector(
@@ -236,10 +336,12 @@ def post_to_note(article: dict) -> bool:
             browser.close()
 
 
-def run(article: dict) -> bool:
+def run(article: dict, thumbnail_path: str = "") -> bool:
     """メイン処理"""
     logger.info("=== note投稿エージェント 開始 ===")
-    success = post_to_note(article)
+    if thumbnail_path:
+        logger.info(f"サムネイル: {thumbnail_path}")
+    success = post_to_note(article, thumbnail_path=thumbnail_path)
     if success:
         logger.info("=== note投稿 完了 ===")
     else:
