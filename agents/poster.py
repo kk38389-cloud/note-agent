@@ -158,6 +158,12 @@ def insert_paid_border(page) -> bool:
     """
     logger.info("有料ボーダーを挿入中...")
 
+    def undo_steps(n: int):
+        """n回アンドゥしてエディタの状態を戻す"""
+        for _ in range(n):
+            page.keyboard.press("Control+z")
+            time.sleep(0.1)
+
     # アプローチ1: 「+」ボタンからブロックメニューを開く
     try:
         page.keyboard.press("Enter")
@@ -201,8 +207,16 @@ def insert_paid_border(page) -> bool:
                         return True
                 except PlaywrightTimeout:
                     continue
+
+        # ボタンが見つからなかった or クリックしても有料ボーダーにならなかった
+        # → Enterのアンドゥ
+        logger.info("アプローチ1失敗。アンドゥして状態を戻す")
+        undo_steps(2)
+        time.sleep(0.3)
+
     except Exception as e:
         logger.warning(f"有料ボーダー アプローチ1失敗: {e}")
+        undo_steps(2)
 
     # アプローチ2: スラッシュコマンド "/有料"
     try:
@@ -226,13 +240,19 @@ def insert_paid_border(page) -> bool:
                     return True
             except PlaywrightTimeout:
                 continue
-        # サジェストが出なかった場合は入力内容を削除
+
+        # サジェストが出なかった → Escape + アンドゥで完全にクリーンアップ
+        logger.info("アプローチ2失敗。アンドゥして状態を戻す")
         page.keyboard.press("Escape")
         time.sleep(0.3)
-        for _ in range(4):
-            page.keyboard.press("Backspace")
+        undo_steps(5)  # Enter + "/有料"の3文字 = 4手順 + 余裕1
+        time.sleep(0.3)
+
     except Exception as e:
         logger.warning(f"有料ボーダー アプローチ2失敗: {e}")
+        page.keyboard.press("Escape")
+        time.sleep(0.3)
+        undo_steps(5)
 
     # デバッグスクリーンショット
     try:
@@ -324,10 +344,10 @@ def post_to_note(article: dict, thumbnail_path: str = "") -> bool:
     # ハッシュタグ文字列
     hashtag_str = " ".join([f"#{tag}" for tag in hashtags])
 
-    # 無料パート末尾にハッシュタグを付ける（有料の場合は無料パートのみにタグ追加）
+    # ハッシュタグは記事の末尾（有料の場合は有料パート末尾）に配置
     if has_paid:
-        full_body_free = f"{body_free}\n\n{hashtag_str}"
-        full_body_paid = body_paid
+        full_body_free = body_free
+        full_body_paid = f"{body_paid}\n\n{hashtag_str}"
     else:
         body = article.get("body", body_free)
         full_body_free = f"{body}\n\n{hashtag_str}"
