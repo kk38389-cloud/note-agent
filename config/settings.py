@@ -1,5 +1,6 @@
 """
 note自動投稿エージェント - 設定ファイル
+シリーズ: AIで副業自動化に挑戦する90日間実録
 """
 import os
 
@@ -11,80 +12,72 @@ NOTE_PASSWORD = os.getenv("NOTE_PASSWORD", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 
 # === 投稿設定 ===
-MIN_ARTICLE_LENGTH = 1500   # 最低文字数
-MAX_ARTICLE_LENGTH = 3000   # 最大文字数
-POST_STATUS = "public"      # "public" or "draft"（下書き保存）
+MIN_ARTICLE_LENGTH = 1500
+MAX_ARTICLE_LENGTH = 3000
+POST_STATUS = "public"
 
-# === テーマ設定（株式・投資） ===
+# === シリーズ設定 ===
+SERIES_TITLE = "AIで副業自動化に挑戦する90日間実録"
+SERIES_CONCEPT = "プログラミング初心者がAIだけで副業システムを構築・収益化を目指すリアルな記録"
+
+# === テーマ設定（4タイプローテーション） ===
 THEMES = [
     {
-        "id": "japan_stocks",
-        "name": "日本株・個別銘柄",
-        "weight": 35,
-        "hashtags": ["日本株", "個別銘柄", "株式投資", "決算"],
-        "article_types": [
-            "【初心者向け】{topic}を徹底解説",
-            "【保存版】{topic}の完全ガイド",
-            "プロが教える{topic}の真実",
-        ]
+        "id": "build_record",
+        "name": "AI自動化・構築記録",
+        "weight": 30,
+        "hashtags": ["AI副業", "Claude", "自動化", "GitHub Actions", "副業"],
+        "description": "システム構築の過程・エラー・解決を正直に記録する"
     },
     {
-        "id": "market_outlook",
-        "name": "市場動向・マクロ分析",
+        "id": "progress_report",
+        "name": "収益化・進捗報告",
+        "weight": 30,
+        "hashtags": ["副業収益", "note収益化", "AI副業", "進捗報告", "副業"],
+        "description": "フォロワー数・スキ数・収益の実数値を公開する"
+    },
+    {
+        "id": "ai_tips",
+        "name": "AI活用ノウハウ",
         "weight": 25,
-        "hashtags": ["日経平均", "相場分析", "投資戦略", "マクロ経済"],
-        "article_types": [
-            "【相場分析】{topic}",
-            "今知るべき{topic}",
-            "投資家なら押さえておきたい{topic}",
-        ]
+        "hashtags": ["ChatGPT", "Claude", "AI活用", "プロンプト", "自動化"],
+        "description": "実際に使ってわかったAIツールの活用術・コツを共有する"
     },
     {
-        "id": "nisa_investment",
-        "name": "NISA・長期投資",
-        "weight": 25,
-        "hashtags": ["NISA", "新NISA", "長期投資", "積立投資"],
-        "article_types": [
-            "新NISAで{topic}をやってみた結果",
-            "【完全解説】{topic}",
-            "{topic}で失敗しないための全知識",
-        ]
-    },
-    {
-        "id": "investment_strategy",
-        "name": "投資戦略・メンタル",
+        "id": "failure_report",
+        "name": "失敗・反省記録",
         "weight": 15,
-        "hashtags": ["投資戦略", "投資メンタル", "ポートフォリオ", "資産運用"],
-        "article_types": [
-            "投資で失敗する人がやっている{topic}",
-            "【実体験】{topic}から学んだこと",
-            "{topic}を乗り越えるための投資術",
-        ]
+        "hashtags": ["AI副業", "失敗談", "副業", "自動化", "note運用"],
+        "description": "やらかしたこと・うまくいかなかったことを正直に報告する"
     },
 ]
 
 # === 記事トピック一覧 ===
 ARTICLE_TOPICS = [
-    # 日本株・個別銘柄
-    ("japan_stocks", "高配当株の選び方と注意点"),
-    ("japan_stocks", "決算書の読み方入門：3つの財務諸表を理解する"),
-    ("japan_stocks", "配当利回り4%以上の優良銘柄の探し方"),
-    ("japan_stocks", "増配株投資で資産を増やす方法"),
-    ("japan_stocks", "PER・PBR・ROEを使った銘柄スクリーニング"),
-    # 市場動向
-    ("market_outlook", "円安が日本株に与える影響と対策"),
-    ("market_outlook", "日銀政策変更で何が変わるか"),
-    ("market_outlook", "景気サイクルに合わせた投資タイミング"),
-    ("market_outlook", "米国株下落時の日本株の動き方"),
-    # NISA・長期投資
-    ("nisa_investment", "新NISAの成長投資枠とつみたて枠の使い分け"),
-    ("nisa_investment", "NISAで個別株を選ぶ基準"),
-    ("nisa_investment", "インデックス投資と個別株投資を組み合わせる方法"),
-    ("nisa_investment", "配当金生活に必要な資産額の計算方法"),
-    # 投資戦略
-    ("investment_strategy", "損切りができない人の心理と対策"),
-    ("investment_strategy", "暴落相場を乗り越えるポートフォリオの作り方"),
-    ("investment_strategy", "集中投資と分散投資の正しい使い分け"),
+    # AI自動化・構築記録
+    ("build_record", "AIでnote自動投稿システムを作った全手順"),
+    ("build_record", "GitHub Actionsで自動投稿を設定するときにハマったこと"),
+    ("build_record", "Claudeに記事を書かせるプロンプトの試行錯誤"),
+    ("build_record", "サムネイル自動生成の仕組みを作るまでの道のり"),
+    ("build_record", "AI副業システムにかかった費用と時間の全記録"),
+    ("build_record", "note自動投稿のクッキー認証を突破した方法"),
+    # 収益化・進捗報告
+    ("progress_report", "AI副業スタートから1ヶ月の正直な数字報告"),
+    ("progress_report", "noteのフォロワーがゼロから増えるまでにやったこと"),
+    ("progress_report", "AI自動投稿を続けて気づいた「伸びる記事」の条件"),
+    ("progress_report", "月次報告：スキ数・フォロワー・収益の実数を全公開"),
+    ("progress_report", "有料記事を初めて出した結果と反省"),
+    # AI活用ノウハウ
+    ("ai_tips", "Claudeへの指示の書き方で記事品質が3倍変わった"),
+    ("ai_tips", "AIが書いた記事をバレずに自然にする編集術"),
+    ("ai_tips", "プロンプトエンジニアリングを独学で身につけた方法"),
+    ("ai_tips", "ChatGPTとClaudeを使い分けるべき場面の違い"),
+    ("ai_tips", "AI記事生成のコストを月1000円以下に抑える方法"),
+    # 失敗・反省記録
+    ("failure_report", "自動投稿でクオリティの低い記事を出してしまった話"),
+    ("failure_report", "AIに任せすぎて読者に怒られた経験"),
+    ("failure_report", "3回連続でGitHub Actionsが失敗した原因と対策"),
+    ("failure_report", "収益化を焦って間違えた価格設定の失敗談"),
 ]
 
 # === パス設定 ===

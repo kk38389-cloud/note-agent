@@ -150,15 +150,188 @@ def upload_thumbnail(page, thumbnail_path: str) -> bool:
         return False
 
 
+def insert_paid_border(page) -> bool:
+    """
+    エディタ内に有料ボーダーを挿入する。
+    無料パートの末尾にカーソルがある状態で呼び出す。
+    失敗しても投稿はキャンセルしない。
+    """
+    logger.info("有料ボーダーを挿入中...")
+
+    # アプローチ1: 「+」ボタンからブロックメニューを開く
+    try:
+        page.keyboard.press("Enter")
+        time.sleep(0.5)
+
+        PLUS_BTN_SELECTORS = [
+            'button[aria-label*="ブロック"]',
+            'button[aria-label*="追加"]',
+            '[class*="addBlock"]',
+            '[class*="block-add"]',
+            '[class*="BlockAdd"]',
+            '[class*="editorAdd"]',
+        ]
+        plus_btn = None
+        for sel in PLUS_BTN_SELECTORS:
+            try:
+                plus_btn = page.wait_for_selector(sel, timeout=2000)
+                if plus_btn:
+                    logger.info(f"「+」ボタン発見: {sel}")
+                    break
+            except PlaywrightTimeout:
+                continue
+
+        if plus_btn:
+            plus_btn.click()
+            time.sleep(1)
+            PAID_ITEM_SELECTORS = [
+                'button:has-text("有料")',
+                'li:has-text("有料")',
+                '[class*="paid"]',
+                'button:has-text("販売")',
+                'li:has-text("有料ライン")',
+            ]
+            for sel in PAID_ITEM_SELECTORS:
+                try:
+                    item = page.wait_for_selector(sel, timeout=2000)
+                    if item:
+                        item.click()
+                        logger.info(f"有料ボーダー挿入完了（メニュー）: {sel}")
+                        time.sleep(1)
+                        return True
+                except PlaywrightTimeout:
+                    continue
+    except Exception as e:
+        logger.warning(f"有料ボーダー アプローチ1失敗: {e}")
+
+    # アプローチ2: スラッシュコマンド "/有料"
+    try:
+        page.keyboard.press("Enter")
+        time.sleep(0.3)
+        page.keyboard.type("/有料")
+        time.sleep(1)
+        SUGGESTION_SELECTORS = [
+            'li:has-text("有料")',
+            '[class*="suggestion"]:has-text("有料")',
+            'button:has-text("有料ライン")',
+            '[role="option"]:has-text("有料")',
+        ]
+        for sel in SUGGESTION_SELECTORS:
+            try:
+                option = page.wait_for_selector(sel, timeout=2000)
+                if option:
+                    option.click()
+                    logger.info(f"有料ボーダー挿入完了（スラッシュ）: {sel}")
+                    time.sleep(1)
+                    return True
+            except PlaywrightTimeout:
+                continue
+        # サジェストが出なかった場合は入力内容を削除
+        page.keyboard.press("Escape")
+        time.sleep(0.3)
+        for _ in range(4):
+            page.keyboard.press("Backspace")
+    except Exception as e:
+        logger.warning(f"有料ボーダー アプローチ2失敗: {e}")
+
+    # デバッグスクリーンショット
+    try:
+        ss_path = os.path.join(LOG_DIR, "paid_border_debug.png")
+        os.makedirs(LOG_DIR, exist_ok=True)
+        page.screenshot(path=ss_path)
+        logger.info(f"有料ボーダーデバッグSS保存: {ss_path}")
+    except Exception:
+        pass
+
+    logger.warning("有料ボーダー挿入失敗（投稿は続行）")
+    return False
+
+
+def set_article_price(page, price: int = 300) -> bool:
+    """
+    公開設定パネルで記事価格を設定する。
+    失敗しても投稿はキャンセルしない。
+    """
+    logger.info(f"記事価格を設定中: {price}円...")
+
+    try:
+        # 「販売設定」「有料にする」などのトグルを探す
+        SALE_TOGGLE_SELECTORS = [
+            'button:has-text("販売設定")',
+            'button:has-text("有料にする")',
+            'label:has-text("有料")',
+            'input[type="radio"][value*="paid"]',
+            '[class*="saleToggle"]',
+            '[class*="SaleToggle"]',
+            '[class*="priceToggle"]',
+        ]
+        for sel in SALE_TOGGLE_SELECTORS:
+            try:
+                toggle = page.wait_for_selector(sel, timeout=3000)
+                if toggle:
+                    toggle.click()
+                    logger.info(f"販売設定トグルクリック: {sel}")
+                    time.sleep(1)
+                    break
+            except PlaywrightTimeout:
+                continue
+
+        # 価格入力フィールドを探す
+        PRICE_INPUT_SELECTORS = [
+            'input[name*="price"]',
+            'input[placeholder*="価格"]',
+            'input[placeholder*="円"]',
+            'input[type="number"]',
+        ]
+        for sel in PRICE_INPUT_SELECTORS:
+            try:
+                price_input = page.wait_for_selector(sel, timeout=3000)
+                if price_input:
+                    price_input.triple_click()
+                    price_input.fill(str(price))
+                    logger.info(f"価格入力完了: {price}円 (セレクタ: {sel})")
+                    time.sleep(0.5)
+                    return True
+            except PlaywrightTimeout:
+                continue
+
+        logger.warning("価格入力フィールドが見つかりません")
+        try:
+            ss_path = os.path.join(LOG_DIR, "price_setting_debug.png")
+            os.makedirs(LOG_DIR, exist_ok=True)
+            page.screenshot(path=ss_path)
+            logger.info(f"価格設定デバッグSS保存: {ss_path}")
+        except Exception:
+            pass
+        return False
+
+    except Exception as e:
+        logger.warning(f"価格設定失敗（投稿は続行）: {e}")
+        return False
+
+
 def post_to_note(article: dict, thumbnail_path: str = "") -> bool:
     """Playwrightでnoteに記事を投稿"""
     title = article["title"]
-    body = article["body"]
     hashtags = article.get("hashtags", [])
 
-    # ハッシュタグを本文末尾に追加
+    # 有料コンテンツの分割対応
+    has_paid = article.get("has_paid_content", False)
+    body_free = article.get("body_free", article.get("body", ""))
+    body_paid = article.get("body_paid", "")
+    article_price = article.get("price", 300)
+
+    # ハッシュタグ文字列
     hashtag_str = " ".join([f"#{tag}" for tag in hashtags])
-    full_body = f"{body}\n\n{hashtag_str}"
+
+    # 無料パート末尾にハッシュタグを付ける（有料の場合は無料パートのみにタグ追加）
+    if has_paid:
+        full_body_free = f"{body_free}\n\n{hashtag_str}"
+        full_body_paid = body_paid
+    else:
+        body = article.get("body", body_free)
+        full_body_free = f"{body}\n\n{hashtag_str}"
+        full_body_paid = ""
 
     with sync_playwright() as p:
         browser = p.chromium.launch(
@@ -270,14 +443,31 @@ def post_to_note(article: dict, thumbnail_path: str = "") -> bool:
             page.click(body_selector)
             time.sleep(0.5)
 
-            # 本文を段落ごとに入力
-            paragraphs = full_body.split("\n")
-            for i, para in enumerate(paragraphs):
-                if para:
-                    page.keyboard.type(para, delay=5)
-                page.keyboard.press("Enter")
-                if i % 20 == 0 and i > 0:
-                    time.sleep(0.3)
+            def type_paragraphs(text: str):
+                """テキストを段落ごとにエディタへ入力する"""
+                paragraphs = text.split("\n")
+                for i, para in enumerate(paragraphs):
+                    if para:
+                        page.keyboard.type(para, delay=5)
+                    page.keyboard.press("Enter")
+                    if i % 20 == 0 and i > 0:
+                        time.sleep(0.3)
+
+            # 無料パートを入力
+            type_paragraphs(full_body_free)
+            time.sleep(0.5)
+
+            if has_paid and full_body_paid:
+                # 有料ボーダーを挿入
+                border_ok = insert_paid_border(page)
+                if border_ok:
+                    logger.info("有料パート入力中...")
+                    type_paragraphs(full_body_paid)
+                    logger.info("有料パート入力完了")
+                else:
+                    # ボーダー挿入失敗時は有料パートも続けて入力（全文公開になるが投稿は継続）
+                    logger.warning("有料ボーダーなしで有料パートを追加（全文公開）")
+                    type_paragraphs(full_body_paid)
 
             time.sleep(1)
             logger.info("本文入力完了")
@@ -291,6 +481,11 @@ def post_to_note(article: dict, thumbnail_path: str = "") -> bool:
 
             # ─── サムネイル（アイキャッチ）アップロード ───
             upload_thumbnail(page, thumbnail_path)
+
+            # ─── 記事価格の設定（有料コンテンツのみ） ───
+            if has_paid:
+                set_article_price(page, price=article_price)
+                time.sleep(1)
 
             # 公開確認ダイアログの「投稿する」ボタン
             try:
@@ -351,12 +546,18 @@ def run(article: dict, thumbnail_path: str = "") -> bool:
 
 if __name__ == "__main__":
     mock_article = {
-        "title": "テスト記事：高配当株の選び方",
-        "body": "## テスト\nこれはテスト投稿です。\n\n## まとめ\nテスト完了。\n\n※本記事は情報提供のみです。",
-        "theme_id": "japan_stocks",
-        "theme_name": "日本株・個別銘柄",
-        "topic": "高配当株の選び方",
-        "hashtags": ["日本株", "高配当", "投資"],
-        "char_count": 100,
+        "title": "【実録】AIに記事を書かせたら読者に怒られた話",
+        "body": "## テスト\nこれはテスト投稿です。\n\n## まとめ\nテスト完了。",
+        "body_free": "## 正直に言います\nAIに全部まかせたら怒られました。\n\nこの記事では、その失敗から学んだことを有料パートで詳しく解説します。",
+        "body_paid": "## 失敗の全容\n実際に起きたことはこうです。\n\nプロンプトはこちら：\n```\n（省略）\n```\n\n## 対策\n次からはこうします。",
+        "has_paid_content": True,
+        "price": 300,
+        "theme_id": "failure_report",
+        "theme_name": "失敗・反省記録",
+        "topic": "AIに任せすぎて読者に怒られた経験",
+        "hashtags": ["AI副業", "失敗談", "副業", "自動化", "note運用"],
+        "char_count": 300,
+        "char_count_free": 80,
+        "char_count_paid": 120,
     }
     run(mock_article)

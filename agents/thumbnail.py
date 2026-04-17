@@ -17,37 +17,46 @@ WIDTH, HEIGHT = 1280, 670
 # テーマ別設定
 # ──────────────────────────────────────────────────
 THEME_COLORS = {
-    "japan_stocks": {
+    "build_record": {
         "bg": (12, 22, 60),
         "accent": (255, 160, 30),   # オレンジ
         "text": (255, 255, 255),
         "sub_text": (180, 200, 240),
-        "label": "日本株・銘柄分析",
+        "label": "AI自動化・構築記録",
         "icon_set": "chart",
     },
-    "market_outlook": {
+    "progress_report": {
         "bg": (8, 35, 28),
         "accent": (0, 210, 140),    # エメラルド
         "text": (255, 255, 255),
         "sub_text": (160, 230, 200),
-        "label": "市場動向・マクロ",
+        "label": "収益化・進捗報告",
         "icon_set": "globe",
     },
-    "nisa_investment": {
+    "ai_tips": {
         "bg": (20, 15, 55),
         "accent": (200, 100, 255),  # バイオレット
         "text": (255, 255, 255),
         "sub_text": (200, 175, 255),
-        "label": "NISA・長期投資",
+        "label": "AI活用ノウハウ",
         "icon_set": "piggy",
     },
-    "investment_strategy": {
+    "failure_report": {
         "bg": (40, 15, 8),
         "accent": (255, 120, 30),   # オレンジレッド
         "text": (255, 255, 255),
         "sub_text": (255, 190, 140),
-        "label": "投資戦略・メンタル",
+        "label": "失敗・反省記録",
         "icon_set": "target",
+    },
+    # 旧テーマ（後方互換）
+    "japan_stocks": {
+        "bg": (12, 22, 60),
+        "accent": (255, 160, 30),
+        "text": (255, 255, 255),
+        "sub_text": (180, 200, 240),
+        "label": "AI副業実録",
+        "icon_set": "chart",
     },
 }
 
@@ -106,7 +115,7 @@ def get_font(size: int, bold: bool = True):
 # ピクセル幅ベースのテキスト折り返し
 # ──────────────────────────────────────────────────
 
-def wrap_text_pixels(text: str, font, max_width: int) -> list[str]:
+def wrap_text_pixels(text: str, font, max_width: int, max_lines: int = 3) -> list[str]:
     from PIL import Image, ImageDraw
     tmp = Image.new("RGB", (1, 1))
     d = ImageDraw.Draw(tmp)
@@ -121,11 +130,15 @@ def wrap_text_pixels(text: str, font, max_width: int) -> list[str]:
         return [text]
 
     BREAK_AFTER = set("】。、｜：！？")
+    MIN_NEXT_LINE = 3  # 次の行頭が最低この文字数以上になるよう調整
+
     lines, remaining = [], text
     while remaining:
         if tw(remaining) <= max_width:
             lines.append(remaining)
             break
+
+        # ピクセル幅で収まる最大文字数を2分探索
         lo, hi = 1, len(remaining)
         while lo < hi:
             mid = (lo + hi + 1) // 2
@@ -134,19 +147,32 @@ def wrap_text_pixels(text: str, font, max_width: int) -> list[str]:
             else:
                 hi = mid - 1
         cut = lo
+
+        # 句読点位置を優先（自然な区切り）
+        best_cut = cut
         for i in range(cut, max(cut - 8, 0), -1):
             if remaining[i - 1] in BREAK_AFTER:
-                cut = i
+                best_cut = i
                 break
-        lines.append(remaining[:cut])
-        remaining = remaining[cut:]
-        if len(lines) >= 4:
+
+        # 次の行頭が極端に短くなる場合は調整（例：「門：」だけにならないよう）
+        next_part = remaining[best_cut:]
+        if next_part and len(next_part) < MIN_NEXT_LINE:
+            # 次行が短すぎる → 今の行を少し短くして次行に渡す
+            best_cut = max(1, best_cut - MIN_NEXT_LINE)
+
+        lines.append(remaining[:best_cut])
+        remaining = remaining[best_cut:]
+
+        if len(lines) >= max_lines:
             if remaining:
                 last = lines[-1]
-                while last and tw(last + "…") > max_width:
+                ellipsis = "…"
+                while last and tw(last + ellipsis) > max_width:
                     last = last[:-1]
-                lines[-1] = last + "…"
+                lines[-1] = last + ellipsis
             break
+
     return lines
 
 
@@ -421,22 +447,33 @@ def generate_thumbnail(article: dict, output_path: str) -> str:
     title_max_h = HEIGHT - title_top - 120  # 下部余白分
     title_max_w = TEXT_AREA_W - MARGIN - 20
 
-    # フォントサイズを動的に決定
+    # フォントサイズを動的に決定（大→小の順で3行以内に収まるサイズを探す）
     chosen_font = None
     chosen_lines = None
-    for font_size in (100, 88, 76, 66, 56, 48):
+    chosen_line_h = 62
+    for font_size in (96, 84, 72, 62, 52, 44, 38, 34):
         f = get_font(font_size, bold=True)
-        lines = wrap_text_pixels(title, f, title_max_w)
-        line_h = font_size + int(font_size * 0.2)
-        if len(lines) * line_h <= title_max_h:
+        lines = wrap_text_pixels(title, f, title_max_w, max_lines=3)
+        line_h = font_size + int(font_size * 0.22)
+        total_h = len(lines) * line_h
+        # 3行以内かつ高さが収まる、かつ最後の行が"…"で終わっていないことを優先
+        fits_height = total_h <= title_max_h
+        no_truncation = not lines[-1].endswith("…")
+        if fits_height and no_truncation:
             chosen_font = f
             chosen_lines = lines
             chosen_line_h = line_h
             break
+        elif fits_height and chosen_font is None:
+            # 切れても高さが収まるなら暫定採用（より小さいサイズで再試行）
+            chosen_font = f
+            chosen_lines = lines
+            chosen_line_h = line_h
+    # フォールバック
     if chosen_font is None:
-        chosen_font = get_font(48, bold=True)
-        chosen_lines = wrap_text_pixels(title, chosen_font, title_max_w)
-        chosen_line_h = 62
+        chosen_font = get_font(34, bold=True)
+        chosen_lines = wrap_text_pixels(title, chosen_font, title_max_w, max_lines=3)
+        chosen_line_h = int(34 * 1.22)
 
     cur_y = title_top
     for line in chosen_lines:

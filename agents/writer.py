@@ -1,6 +1,6 @@
 """
-writer.py - note記事生成エージェント（売れる記事公式版）
-分析に基づく「固定ファンがつく・続きが気になる」記事を生成する
+writer.py - note記事生成エージェント
+シリーズ: AIで副業自動化に挑戦する90日間実録
 """
 import json
 import random
@@ -14,7 +14,8 @@ from datetime import datetime, timezone, timedelta
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from config.settings import (
     ANTHROPIC_API_KEY, THEMES, ARTICLE_TOPICS,
-    MIN_ARTICLE_LENGTH, MAX_ARTICLE_LENGTH
+    MIN_ARTICLE_LENGTH, MAX_ARTICLE_LENGTH,
+    SERIES_TITLE, SERIES_CONCEPT
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -22,105 +23,125 @@ logger = logging.getLogger("note_writer")
 
 
 # ─────────────────────────────────────────
-# 売れるタイトル公式（分析結果より）
+# タイトル公式（テーマ別）
 # ─────────────────────────────────────────
-TITLE_FORMULAS = [
-    # 実録・告白型（生々しさで信頼獲得）
-    "【実録】{topic}で{amount}円の損失を出した私が、その後どう立て直したか",
-    "正直に言います。{topic}で失敗した本当の理由と、今やっていること",
-    "誰も教えてくれなかった{topic}の落とし穴｜{count}年やって気づいたこと",
-    # 数字・具体性型（権威性）
-    "{topic}を{count}銘柄スクリーニングした結果、残った条件が意外だった",
-    "配当金{amount}円達成までの{count}ヶ月間、実際にやったことを全部公開",
-    "【保存版】{topic}で負けた投資家{count}人に共通していた{num}つのパターン",
-    # 否定・反転型（好奇心を刺激）
-    "{topic}は「{count}倍になる株」より「絶対買わない株」を決めるほうが重要だった",
-    "証券会社が絶対に教えない{topic}の真実｜私が{count}年かけて学んだこと",
-    "「{topic}で失敗する人」と「成功する人」の違いは才能じゃなかった",
-    # 時事×投資型（今すぐ読む理由を作る）
-    "【今週の相場】{topic}が動いた本当の理由と、個人投資家が今すべきこと",
-    "暴落相場で{topic}をどう動かしたか｜私のリアルな判断記録",
-]
-
-TITLE_VARS = {
-    "amount": ["23万", "47万", "8万", "120万", "30万"],
-    "count": ["3", "5", "10", "50", "100", "2", "4"],
-    "num": ["3", "5", "7"],
+TITLE_FORMULAS = {
+    "build_record": [
+        "【構築記録】{topic}｜失敗{count}回を経てたどり着いた方法",
+        "正直に言います。{topic}でこんなにハマるとは思っていなかった",
+        "【全手順公開】{topic}を完成させるまでの{count}週間",
+        "{topic}でやらかした{count}つのミスと、その解決策",
+        "【実録】{topic}にかかった時間とお金を全部さらします",
+    ],
+    "progress_report": [
+        "【第{episode}回】{topic}｜今週の実数値を全公開します",
+        "AI副業{weeks}週目の正直な報告：{topic}",
+        "{topic}の現実｜スキ{likes}件・フォロワー{followers}人・収益{revenue}円",
+        "【月次報告】{topic}の数字を隠さず公開する理由",
+        "AI自動投稿を{weeks}週続けた結果、わかったこと",
+    ],
+    "ai_tips": [
+        "【保存版】{topic}｜{count}回試して見えてきた法則",
+        "Claudeに{topic}させるプロンプトを{count}ヶ月かけて改善した話",
+        "正直、{topic}はこうすればよかった｜{count}つの改善点",
+        "【比較検証】{topic}でAIと人間、どちらが優れているか",
+        "{topic}で月{amount}円節約できた具体的な方法",
+    ],
+    "failure_report": [
+        "【反省】{topic}で完全にやらかした話を正直に書きます",
+        "AI副業{weeks}週目の失敗報告：{topic}",
+        "恥ずかしいけど書きます。{topic}でした失敗の全貌",
+        "【教訓】{topic}から学んだ{count}つのこと",
+        "{topic}が原因で読者を失いかけた話",
+    ],
 }
 
+TITLE_VARS = {
+    "count": ["3", "5", "7", "2", "4"],
+    "weeks": ["2", "3", "4", "6", "8"],
+    "amount": ["3,000", "5,000", "1万", "2万"],
+    "likes": ["12", "23", "47", "8", "31"],
+    "followers": ["18", "34", "52", "7", "89"],
+    "revenue": ["0", "500", "1,200", "3,400"],
+}
+
+
 # ─────────────────────────────────────────
-# 売れる記事構成スタイル（5パターン）
+# 記事スタイル（4パターン）
 # ─────────────────────────────────────────
-SERIES_STYLES = [
-    {
-        "name": "実録・失敗告白型",
-        "opening": "最初に正直に言います。私は{topic}で失敗しています。",
+SERIES_STYLES = {
+    "build_record": {
+        "name": "構築記録型",
+        "opening": "今回は{topic}について、実際にやってみてわかったことを正直に書きます。",
         "structure": [
-            "【その失敗の全貌】金額・時期・銘柄名を含む具体的な失敗談",
-            "【なぜそうなったのか】心理面・判断ミスの分析",
-            "【同じ失敗をしている人の特徴】読者への鏡として",
-            "【私が変えたこと】具体的な改善策と根拠",
-            "【今の結果】正直に現状報告",
-            "【次回予告】続きを読みたくなる引き",
+            "【なぜこれを作ろうと思ったか】きっかけと動機",
+            "【最初に試みたこと】最初のアプローチとその結果",
+            "【ハマったポイント】エラー・失敗・想定外のこと",
+            "【解決策と最終的な形】どう乗り越えたか・現在の状態",
+            "【かかったコスト（時間・お金）】正直な数字",
+            "【次にやること・次回予告】",
         ],
-        "ending_hook": "次回は、この失敗から生まれた「私だけのスクリーニング条件」を全部公開します。",
+        "ending_hook": "次回は、このシステムを実際に動かしてみた結果と、新たに発生した問題を報告します。",
     },
-    {
-        "name": "銘柄分析・実践型",
-        "opening": "{topic}について、今週じっくり分析してみました。",
+    "progress_report": {
+        "name": "進捗報告型",
+        "opening": "AI副業自動化チャレンジ、今週も正直に報告します。",
         "structure": [
-            "【なぜ今この銘柄/テーマに注目したか】時事背景",
-            "【決算・財務データの読み解き】PER/PBR/配当利回りの実数値",
-            "【チャートと需給の実態】個人投資家目線での解釈",
-            "【買い・様子見・見送りの判断と根拠】自分の結論を明言",
-            "【リスクシナリオ】悪い場合も正直に書く",
-            "【次回予告】続きを読みたくなる引き",
+            "【今週の数字（全公開）】スキ数・フォロワー・収益の実数値",
+            "【先週との比較】増えたか減ったか、その理由の考察",
+            "【今週やったこと】システム改善・記事調整の内容",
+            "【うまくいったこと・いかなかったこと】正直な評価",
+            "【来週の目標と戦略】",
+            "【次回予告】",
         ],
-        "ending_hook": "来週はこの銘柄を実際に買うかどうか、判断の瞬間を記録します。",
+        "ending_hook": "来週は、今週試した改善策の効果を数字で報告します。結果がよければ詳しく解説します。",
     },
-    {
-        "name": "スクリーニング公開型",
-        "opening": "今回は私が実際に使っている{topic}のスクリーニング条件を全部さらします。",
+    "ai_tips": {
+        "name": "AI活用ノウハウ型",
+        "opening": "AIを使って副業記事を量産する中で、{topic}についての発見がありました。",
         "structure": [
-            "【なぜスクリーニングが必要か】感情投資との決別",
-            "【私のスクリーニング条件（全公開）】具体的な数値条件",
-            "【今回残った銘柄の傾向】セクター・特徴",
-            "【その中で特に気になった1〜2銘柄】詳しく分析",
-            "【スクリーニングの限界と補完方法】正直な欠点も書く",
-            "【次回予告】続きを読みたくなる引き",
+            "【最初はこうしていた】改善前のやり方と問題点",
+            "【気づいたきっかけ】なぜ変えようと思ったか",
+            "【実際に試した方法】具体的な手順とプロンプト例",
+            "【比較結果】改善前後の違いを具体的に",
+            "【注意点・限界】万能ではないところも正直に",
+            "【まとめと次回予告】",
         ],
-        "ending_hook": "次回は、スクリーニングをくぐり抜けた銘柄を実際に買った結果を報告します。",
+        "ending_hook": "次回は、このノウハウをさらに発展させた応用編を公開します。",
     },
-    {
-        "name": "投資メンタル・心理型",
-        "opening": "投資で一番難しいのは銘柄選びじゃない。自分の心との戦いだと気づきました。",
+    "failure_report": {
+        "name": "失敗報告型",
+        "opening": "今週、やらかしました。{topic}の話を正直に書きます。",
         "structure": [
-            "【今週あった心理的な揺れ】具体的なエピソード",
-            "【その時の頭の中】感情の動きを正直に描写",
-            "【なぜ感情で動くと負けるのか】行動経済学的な解説",
-            "【私が実際に使っているルール】具体的なマイルール",
-            "【それでも揺れる時の対処法】読者が明日から使えること",
-            "【次回予告】続きを読みたくなる引き",
+            "【何が起きたか】失敗の全貌を隠さず説明",
+            "【なぜそうなったか】原因の分析（言い訳なし）",
+            "【読者・システムへの影響】実害はあったか",
+            "【すぐやった対処】緊急対応の内容",
+            "【同じ失敗をしないための対策】具体的な改善点",
+            "【次回予告】懲りずに続けます宣言",
         ],
-        "ending_hook": "次回は、実際に感情に負けて損切りできなかった銘柄の顛末を公開します。",
+        "ending_hook": "懲りずに続けます。次回は失敗から生まれた改善策の効果を報告します。",
     },
-    {
-        "name": "時事×投資考察型",
-        "opening": "今週の相場、正直に言うとかなり迷いました。",
-        "structure": [
-            "【今週起きたこと】ニュースと株価の動きを整理",
-            "【一般的な解説との私の見解の違い】独自視点を打ち出す",
-            "【個人投資家が本当に気にすべきポイント】プロ目線との差",
-            "【私のポートフォリオへの影響と対応】実際の行動",
-            "【来週の注目ポイント】読者が使える予測",
-            "【次回予告】続きを読みたくなる引き",
-        ],
-        "ending_hook": "来週は、今週の動きを受けて実際に売買した記録を全部公開します。",
-    },
-]
+}
+
+
+# ─────────────────────────────────────────
+# エピソード番号を取得
+# ─────────────────────────────────────────
+def get_episode_number(posts_file: str) -> int:
+    """投稿履歴から次のエピソード番号を計算"""
+    if not os.path.exists(posts_file):
+        return 1
+    try:
+        with open(posts_file, "r", encoding="utf-8") as f:
+            posts = json.load(f)
+        return len(posts) + 1
+    except Exception:
+        return 1
 
 
 def select_topic(used_topics: list) -> dict:
+    """テーマとトピックをランダムに選択（使用済みを避ける）"""
     total_weight = sum(t["weight"] for t in THEMES)
     r = random.uniform(0, total_weight)
     cumulative = 0
@@ -131,16 +152,17 @@ def select_topic(used_topics: list) -> dict:
             selected_theme = theme
             break
 
-    theme_topics = [t for t in ARTICLE_TOPICS if t[0] == selected_theme["id"]]
+    theme_id = selected_theme["id"]
+    theme_topics = [t for t in ARTICLE_TOPICS if t[0] == theme_id]
     unused = [t for t in theme_topics if t[1] not in used_topics]
     if not unused:
         unused = theme_topics
 
     topic_tuple = random.choice(unused)
-    style = random.choice(SERIES_STYLES)
+    style = SERIES_STYLES[theme_id]
 
     return {
-        "theme_id": selected_theme["id"],
+        "theme_id": theme_id,
         "theme_name": selected_theme["name"],
         "topic": topic_tuple[1],
         "hashtags": selected_theme["hashtags"],
@@ -148,109 +170,133 @@ def select_topic(used_topics: list) -> dict:
     }
 
 
-def generate_title(topic_info: dict) -> str:
-    formula = random.choice(TITLE_FORMULAS)
+def generate_title(topic_info: dict, episode: int) -> str:
+    """テーマに合ったタイトルを生成"""
+    theme_id = topic_info["theme_id"]
+    formulas = TITLE_FORMULAS.get(theme_id, TITLE_FORMULAS["build_record"])
+    formula = random.choice(formulas)
     topic = topic_info["topic"]
+
     title = formula.format(
         topic=topic,
-        amount=random.choice(TITLE_VARS["amount"]),
+        episode=episode,
         count=random.choice(TITLE_VARS["count"]),
-        num=random.choice(TITLE_VARS["num"]),
+        weeks=random.choice(TITLE_VARS["weeks"]),
+        amount=random.choice(TITLE_VARS["amount"]),
+        likes=random.choice(TITLE_VARS["likes"]),
+        followers=random.choice(TITLE_VARS["followers"]),
+        revenue=random.choice(TITLE_VARS["revenue"]),
     )
     return title
 
 
-def call_claude(title: str, topic: str, theme: str, style: dict, news_context: str = "") -> str:
+def call_claude(title: str, topic: str, theme_name: str, style: dict,
+                episode: int, news_context: str = "") -> str:
     if not ANTHROPIC_API_KEY:
         logger.warning("ANTHROPIC_API_KEY未設定。モック記事を生成します")
-        return generate_mock_article(title, topic, style)
+        return generate_mock_article(title, topic, style, episode)
 
-    # 現在の日本時間を取得
     jst = timezone(timedelta(hours=9))
     now_jst = datetime.now(jst)
     today_str = now_jst.strftime("%Y年%m月%d日")
     this_year = now_jst.year
     last_year = this_year - 1
-    two_years_ago = this_year - 2
 
     news_section = ""
     if news_context:
-        news_section = f"""
-【本日の関連ニュース（記事に自然に織り込んでください）】
-{news_context}
-"""
+        news_section = f"【関連ニュース（自然に織り込む）】\n{news_context}\n"
 
     structure_text = "\n".join([f"  {s}" for s in style["structure"]])
 
     prompt = f"""
-あなたは日本株投資5年目の個人投資家で、毎週noteに投資日記を書いています。
-読者3,000人以上の固定ファンがいて、「正直すぎる投資記録」で人気です。
+あなたは会社員をしながらAI副業自動化に挑戦中のブロガーです。
+シリーズ「{SERIES_TITLE}」を毎週noteで更新中。{SERIES_CONCEPT}
 
-━━━━━━━━━━━━━━━━━━━━━━━━
-【重要】今日の日付: {today_str}
-- 「今年」= {this_year}年、「去年」= {last_year}年、「一昨年」= {two_years_ago}年
-- 記事内の年号・時期は必ずこの基準に合わせること
-- 「2024年」を「今年」や「最近」と書かないこと
-━━━━━━━━━━━━━━━━━━━━━━━━
+今日の日付: {today_str}（今年={this_year}年、去年={last_year}年）
 
-タイトル: 「{title}」
-テーマ: {theme} / {topic}
-今回の記事スタイル: {style['name']}
-冒頭の書き出し（この一文から始めてください）: 「{style['opening'].format(topic=topic)}」
-
-━━━━━━━━━━━━━━━━━━━━━━━━
+第{episode}回 / テーマ:{theme_name} / トピック:{topic}
+タイトル:「{title}」
+書き出し（必ずこの一文から始める）:「{style['opening'].format(topic=topic)}」
 {news_section}
 
-【構成（この順番で書いてください）】
+━━━━━━━━━━━━━━━━━━━━━━━━
+【記事構成：無料パート＋有料パートの2部構成で書く】
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+■ 無料パート（400〜600字）
+目的：「この続きを300円払ってでも読みたい」と思わせる
+
+書き方のルール：
+1. 冒頭は「痛い失敗談」か「意外な数字」から始める
+   例:「深夜2時、Claudeが生成した記事を見て頭を抱えました。」
+   例:「3週間で投稿した9本の記事。スキの合計は…12件でした。」
+
+2. 問題・葛藤を読者と共有する（あるある感）
+   読者が「自分もそう思ってた」と感じる瞬間を作る
+
+3. 「解決の糸口を見つけた」ことだけをほのめかす
+   具体的な方法は絶対に書かない。「あること」「ある方法」と表現する
+
+4. 有料パートの予告を具体的に書く（これが購入動機になる）
+   ❌ 悪い例：「続きは有料です」
+   ✅ 良い例：
+   「この記事の有料パートでは以下を公開します：
+   ・私が実際に使っているClaudeへのプロンプト（全文コピペOK）
+   ・記事品質が上がった具体的な変更点3つ
+   ・今月のAPI費用の実額と費用対効果の計算式」
+
+   → 「これだけ具体的なら300円出す価値ある」と思わせる
+
+---PAID_BORDER---
+
+■ 有料パート（1200〜2000字）
+目的：「買ってよかった」と思わせる。期待を超える内容にする
+
+構成（この順で書く）：
 {structure_text}
 
-【売れる記事の必須要素】
-1. 冒頭3行で読者の「あるある」な痛みを言語化する
-   例:「スキが多い記事を見て真似したのに、なぜか自分のポートフォリオは同じ成果が出ない。そんな経験、ありませんか？」
+書き方のルール：
+1. 具体的な数字を必ず入れる
+   - 時間：「作業12時間」「深夜2時まで」
+   - コスト：「Claude API月890円」「Pro契約月3,000円」
+   - 結果：「スキ+23件」「フォロワー+7人」「収益500円」
 
-2. 具体的な数字を必ず含める
-   - 実際の株価・PER・配当利回り・損益額（架空でもリアルな数字を）
-   - 「〇〇倍」「〇〇万円」「〇〇%」などを積極的に使う
+2. 手順・コマンド・プロンプトを実際に書く
+   読者がコピーして使えるレベルまで具体化する
+   コードブロックやプロンプト例を積極的に使う
 
-3. 著者の「迷い・弱さ」を正直に書く
-   - 完璧な投資家像を出さない
-   - 「正直、まだ答えは出ていない」「今も迷っている」が共感を生む
+3. 「うまくいかなかったこと」も正直に書く
+   失敗の告白が信頼につながる。美化しない
 
-4. 見出しに「感情語」を入れる
-   - 「やらかした理由」「後悔した瞬間」「やっと気づいた」など
+4. 最後は必ずこの形式で締める：
+   ---
+   **次回予告**
+   {style['ending_hook']}
 
-5. 終わり方のルール（最重要）
-   - 記事の最後は必ず「次回予告」で終わる
-   - テンプレート:
-     ---
-     **次回予告**
-     {style['ending_hook']}
+   毎週{this_year}年更新中。フォローしておくと通知が届きます。
+   「スキ」を押してもらえると次を書くモチベになります😊
 
-     この続きが気になる方は、フォローしておくと更新通知が届きます。
-     「スキ」を押してもらえると、続きを書くモチベになります😊
+   ※本記事はAI副業に挑戦する個人の記録です。収益を保証するものではありません。
 
-     ※本記事は個人の投資記録であり、特定銘柄の売買を推奨するものではありません。
-
-【禁止事項】
-- 「〇〇が大切です」で終わる教科書的まとめ
-- 「投資は長期・分散・積立が基本」だけの薄い結論
-- 初心者向け用語説明（読者は中級者）
-- 根拠のない断言・過度な推奨表現
-
-【文字数】{MIN_ARTICLE_LENGTH}〜{MAX_ARTICLE_LENGTH}字（多めに書いてください）
-
-記事本文のみ出力してください（タイトル・説明文は不要）。
+━━━━━━━━━━━━━━━━━━━━━━━━
+【出力形式】
+無料パートの本文を書いてから、
+「---PAID_BORDER---」という区切り文字を1行で入れ、
+そのあと有料パートの本文を書く。
+タイトルや説明文は不要。本文のみ出力。
+━━━━━━━━━━━━━━━━━━━━━━━━
 """
 
     payload = json.dumps({
         "model": "claude-haiku-4-5-20251001",
-        "max_tokens": 6000,
+        "max_tokens": 7000,
         "system": (
-            "あなたは日本株投資5年目の個人投資家です。"
-            "毎週noteに「正直すぎる投資記録」を書いて固定ファン3,000人を持っています。"
-            "特徴:①失敗も包み隠さず書く ②具体的な数字を必ず出す ③続きが気になる終わり方をする "
-            "④読者と同じ目線で語る（上から目線NG）⑤毎回「次回予告」で終わる。"
-            "投資助言にならないよう、あくまで個人の記録として書いてください。"
+            f"あなたは会社員をしながらAI副業自動化に挑戦中のブロガーです。"
+            f"シリーズ「{SERIES_TITLE}」を毎週noteで更新しています。"
+            "特徴:①失敗も数字も正直に書く ②手順・コスト・プロンプトを具体的に公開する "
+            "③過度な成功アピールをしない ④読者と同じ目線 "
+            "⑤無料パートで「続きを買いたい」と思わせ、有料パートで期待を超える。"
+            "---PAID_BORDER---という区切り文字で無料/有料を分けて出力してください。"
         ),
         "messages": [{"role": "user", "content": prompt}]
     }).encode("utf-8")
@@ -272,69 +318,80 @@ def call_claude(title: str, topic: str, theme: str, style: dict, news_context: s
     return data["content"][0]["text"]
 
 
-def generate_mock_article(title: str, topic: str, style: dict) -> str:
+def generate_mock_article(title: str, topic: str, style: dict, episode: int) -> str:
     jst = timezone(timedelta(hours=9))
     now_jst = datetime.now(jst)
-    last_year = now_jst.year - 1
-    two_years_ago = now_jst.year - 2
+    this_year = now_jst.year
 
-    return f"""最初に正直に言います。私は{topic}で失敗しています。
+    return f"""{style['opening'].format(topic=topic)}
 
-先月、含み損が47万円を超えた時、初めてスマホの証券アプリを開くのが怖くなりました。
+第{episode}回です。今週もリアルな進捗を報告します。
 
-## その失敗の全貌
+深夜1時、またPCの前に座っています。
+{topic}に取り組んで3週間。正直、思っていたより全然うまくいっていません。
 
-時期: {two_years_ago}年秋〜{last_year}年初頭
-対象: {topic}関連3銘柄
-損失額: -47万円（評価損）
+今週の数字を先に言います。スキ数：+3件（合計19件）、フォロワー：+2人（合計23人）、収益：0円。
 
-一番やらかしたのは「下がったら買い増す」を繰り返したことです。
-PERが割安に見えたから、という理由だけで。
+ゼロです。
 
-## なぜそうなったのか
+でも今週、ひとつだけ「これは使える」という発見がありました。
 
-今思えば、単純に「値ごろ感」だけで判断していました。
+この記事の有料パートでは以下を公開します：
+・私が実際に使っているClaudeへのプロンプト（コピペOK）
+・記事生成コストを月890円に抑えた具体的な設定
+・スキ数が増えた記事と増えなかった記事の明確な違い3つ
 
-- セクター全体のトレンドを見ていなかった
-- 業績の質（営業利益率の推移）を確認していなかった
-- 自分の許容損失額を決めていなかった
+---PAID_BORDER---
 
-この3つが全部欠けていました。
+## 今週やったこと・学んだこと
 
-## 同じ失敗をしている人の特徴
+{topic}について、実際に手を動かして気づいたことを書きます。
 
-読者の方から「私も同じです」というコメントをよくもらうのですが、共通しているのは：
+最初はうまくいきませんでした。
+エラーが出て、調べて、また別のエラーが出て。
+そのループを合計12時間繰り返しました。
 
-**「下がった = 割安」という思い込み**
+### 実際に使っているプロンプト（全文）
 
-株価が下がる理由は必ずあります。その理由が一時的なものか、構造的なものかを見極めずに買うのが最大の罠です。
+```
+あなたはAI副業に挑戦中の会社員ブロガーです。
+以下のトピックについて、失敗談と学びを正直に書いてください。
+数字は必ず具体的に（時間・コスト・結果）。
+```
 
-## 私が変えたこと
+このプロンプトに変えてから、記事の「読んだ感」が変わりました。
 
-今は買う前に必ずチェックリストを使っています。
+### コストの実態
 
-□ 過去3期の営業利益率は安定しているか
-□ セクター全体の方向性はどうか
-□ この銘柄だけの下落か、セクター全体の下落か
+- Claude API: 月890円（記事12本生成）
+- GitHub Actions: 無料枠で収まっています
+- 合計: 月890円
 
-これだけで、無駄な買い増しは8割減りました。
+### スキが増えた記事の共通点
 
-## 今の結果
+調べてみると明確な傾向がありました。
 
-正直に言うと、まだ全回復はしていません。
--47万円が今は-12万円です。
+1. 冒頭に具体的な数字がある
+2. 失敗談から始まっている
+3. 見出しに「正直」「実録」が入っている
 
-ただ、新しいルールで入った銘柄は全て含み益です。
+この3つが揃った記事のスキ率が、そうでない記事の2.3倍でした。
+
+## 失敗したこと
+
+AIに丸投げしすぎた記事を1本出してしまいました。
+内容が薄く、読み返すと「これはダメだ」とわかるレベル。
+今後は生成後に必ず自分でチェックします。
 
 ---
 
 **次回予告**
 {style['ending_hook']}
 
-この続きが気になる方は、フォローしておくと更新通知が届きます。
-「スキ」を押してもらえると、続きを書くモチベになります😊
+毎週{this_year}年更新中。フォローしておくと通知が届きます。
+「スキ」を押してもらえると次を書くモチベになります😊
 
-※本記事は個人の投資記録であり、特定銘柄の売買を推奨するものではありません。
+※本記事はAI副業に挑戦する個人の記録です。収益を保証するものではありません。
 """
 
 
@@ -345,21 +402,30 @@ def run(news_context: str = "") -> dict | None:
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "data", "posts.json"
     )
+
+    # 使用済みトピックと現在のエピソード番号を取得
     posts = []
     if os.path.exists(posts_file):
         with open(posts_file, "r", encoding="utf-8") as f:
             posts = json.load(f)
     used_topics = [p.get("topic", "") for p in posts]
+    episode = get_episode_number(posts_file)
 
     topic_info = select_topic(used_topics)
-    title = generate_title(topic_info)
-    logger.info(f"テーマ: {topic_info['theme_name']} / スタイル: {topic_info['style']['name']}")
+    title = generate_title(topic_info, episode)
+
+    logger.info(f"第{episode}回 / テーマ: {topic_info['theme_name']}")
+    logger.info(f"スタイル: {topic_info['style']['name']}")
     logger.info(f"タイトル: {title}")
 
     try:
         body = call_claude(
-            title, topic_info["topic"], topic_info["theme_name"],
-            topic_info["style"], news_context
+            title,
+            topic_info["topic"],
+            topic_info["theme_name"],
+            topic_info["style"],
+            episode,
+            news_context,
         )
         logger.info(f"記事生成完了: {len(body)}文字")
     except Exception as e:
@@ -369,21 +435,42 @@ def run(news_context: str = "") -> dict | None:
     if len(body) < MIN_ARTICLE_LENGTH:
         logger.warning(f"文字数不足: {len(body)}字（最低{MIN_ARTICLE_LENGTH}字）")
 
-    # ハッシュタグを強化版に更新
-    enhanced_hashtags = topic_info["hashtags"] + [
-        "投資記録", "資産形成", "個人投資家"
-    ]
+    enhanced_hashtags = topic_info["hashtags"] + ["副業記録", "AI自動化", "note運用"]
+
+    # 無料/有料パートに分割
+    PAID_BORDER = "---PAID_BORDER---"
+    if PAID_BORDER in body:
+        parts = body.split(PAID_BORDER, 1)
+        body_free = parts[0].strip()
+        body_paid = parts[1].strip()
+    else:
+        # 分割記号がない場合は全文を無料扱い
+        logger.warning("有料ボーダーが見つかりません。全文を無料として扱います")
+        body_free = body
+        body_paid = ""
+
+    # 投稿用の本文（無料＋区切り＋有料を結合、poster.pyが分割して処理）
+    full_body = body
 
     article = {
         "title": title,
-        "body": body,
+        "body": full_body,        # poster.pyが---PAID_BORDER---で分割
+        "body_free": body_free,   # 無料パート（参照用）
+        "body_paid": body_paid,   # 有料パート（参照用）
+        "has_paid_content": bool(body_paid),
         "theme_id": topic_info["theme_id"],
         "theme_name": topic_info["theme_name"],
         "topic": topic_info["topic"],
         "style": topic_info["style"]["name"],
-        "hashtags": list(dict.fromkeys(enhanced_hashtags)),  # 重複除去
-        "char_count": len(body),
+        "series_no": f"第{episode}回",
+        "episode": episode,
+        "hashtags": list(dict.fromkeys(enhanced_hashtags)),
+        "char_count": len(full_body),
+        "char_count_free": len(body_free),
+        "char_count_paid": len(body_paid),
     }
+
+    logger.info(f"無料パート: {len(body_free)}字 / 有料パート: {len(body_paid)}字")
 
     logger.info("=== note記事生成 完了 ===")
     return article
@@ -392,10 +479,10 @@ def run(news_context: str = "") -> dict | None:
 if __name__ == "__main__":
     article = run()
     if article:
-        print(f"\nタイトル: {article['title']}")
+        print(f"\n{article['series_no']} タイトル: {article['title']}")
         print(f"スタイル: {article['style']}")
         print(f"文字数: {article['char_count']}")
-        print("\n--- 本文（先頭400字）---")
-        print(article["body"][:400])
-        print("\n--- 本文（末尾400字）---")
-        print(article["body"][-400:])
+        print("\n--- 本文（先頭500字）---")
+        print(article["body"][:500])
+        print("\n--- 本文（末尾300字）---")
+        print(article["body"][-300:])
